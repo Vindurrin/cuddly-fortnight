@@ -1,5 +1,5 @@
 import { esc, dayKey } from '../util.js'
-import { maxIntervalForExam } from '../scheduler.js'
+import { TIMER_MODES } from '../timer.js'
 
 export const title = () => 'Settings'
 
@@ -16,6 +16,9 @@ export function render(ctx, route, root) {
       <div class="field"><label for="testLength">Questions per test</label>
         <input id="testLength" type="number" min="1" max="200" value="${s.testLength}" style="width:110px">
         <span class="help">The default length of a test. The real exam has 65 questions. You can also pick a length each time on the Test page.</span></div>
+      <div class="field"><label for="testTimer">Test timer</label>
+        <select id="testTimer">${Object.entries(TIMER_MODES).map(([k, v]) => opt(k, v, s.testTimer)).join('')}</select>
+        <span class="help">Exam pace counts down at the real exam's rate (about 83 seconds a question).</span></div>
       <div class="field"><label for="newPerDay">New notecards per day</label>
         <input id="newPerDay" type="number" min="0" max="500" value="${s.newPerDay}" style="width:110px">
         <span class="help">How many unseen notecards to introduce each day. There are ${ctx.deck.cards.filter(c => c.kind !== 'mcq').length} in total.</span></div>
@@ -64,6 +67,7 @@ export function render(ctx, route, root) {
     e.target.value = n
     save({ testLength: n })
   })
+  $('#testTimer').addEventListener('change', e => save({ testTimer: e.target.value }))
   $('#newOrder').addEventListener('change', e => save({ newOrder: e.target.value }))
   $('#shuffle').addEventListener('change', e => save({ shuffleOptions: e.target.checked }))
   $('#theme').addEventListener('change', e => { save({ theme: e.target.value }); ctx.applyTheme(e.target.value) })

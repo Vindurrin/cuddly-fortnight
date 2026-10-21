@@ -7,6 +7,7 @@ import { previewIntervals, GRADE_LABEL } from '../scheduler.js'
 import { notecardsFor, topicsOf } from '../deck.js'
 import { cardChips, pct, taskName } from '../ui.js'
 import { esc, shuffle } from '../util.js'
+import { Clock, paceBudgetMs, fmtClock, fmtSpan } from '../timer.js'
 
 const LETTERS = 'ABCDEFGH'
 const BLANK = id => ({ id, s: 'new', step: 0, ease: 2.5, ivl: 0, due: 0, reps: 0, lapses: 0, streak: 0, first: 0, last: 0 })
@@ -16,6 +17,7 @@ const BLANK = id => ({ id, s: 'new', step: 0, ease: 2.5, ivl: 0, due: 0, reps: 0
  * @param cfg.cards    cards to run, in order
  * @param cfg.learning cards already in learning steps (flash only)
  * @param cfg.next     extra links for the flash finish screen: [{ href, label }]
+ * @param cfg.timer    test only: 'pace' (countdown at exam pace) | 'stopwatch' | 'off'
  */
 export function runSession(ctx, root, cfg) {
   const { deck, store } = ctx
@@ -23,6 +25,9 @@ export function runSession(ctx, root, cfg) {
   const isTest = cfg.mode === 'test'
   const opts = { fuzz: true, ...ctx.levelOpts() }
   const total = cfg.cards.length + (cfg.learning?.length ?? 0)
+
+  const timerMode = isTest ? cfg.timer ?? 'off' : 'off'
+  const clock = timerMode === 'off' ? null : new Clock(timerMode === 'pace' ? paceBudgetMs(total) : null)
 
   const session = new Session({
     plan: { main: cfg.cards, learning: cfg.learning ?? [] }, deck, options: opts, requeue: !isTest,
@@ -42,12 +47,33 @@ export function runSession(ctx, root, cfg) {
     const left = r.new + r.review + r.learning
     const done = isTest ? results.length : Math.max(0, total - left)
     const label = isTest ? `Question ${Math.min(results.length + 1, total)} of ${total}` : `${left} left`
-    return `<div class="run-head">
+    return `<div class="run-head${clock ? ' timed' : ''}">
       <a class="btn link" href="${cfg.exitHref}" data-exit>← Exit</a>
       <div><div class="count" style="margin-bottom:6px">${label}</div>
         <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><i style="width:${(done / total) * 100}%"></i></div></div>
+      ${clock ? `<div class="clock" data-clock title="${timerMode === 'pace' ? 'Time left. Pauses while you read explanations.' : 'Time spent answering. Pauses while you read explanations.'}"></div>` : ''}
       <button class="btn link" data-act="undo" ${session.canUndo ? '' : 'disabled'} title="Undo last answer (Z)">Undo</button>
     </div>`
+  }
+
+  const clockRunning = () => !!card && phase === 'question' && !document.hidden
+
+  function paintClock() {
+    const el = root.querySelector('[data-clock]')
+    if (!el || !clock) return
+    const low = timerMode === 'pace' && (clock.remaining < 60_000 || clock.remaining < clock.budgetMs * 0.1)
+    el.textContent = timerMode === 'pace' ? fmtClock(clock.remaining) : fmtClock(clock.spent)
+    el.classList.toggle('paused', !clockRunning())
+    el.classList.toggle('low', low)
+  }
+
+  let ticker = null
+  if (clock) {
+    ticker = setInterval(() => {
+      clock.tick(Date.now(), clockRunning())
+      paintClock()
+      if (clock.expired && clockRunning()) finishTest(true)
+    }, 200)
   }
 
   function present(c) {
@@ -126,6 +152,7 @@ export function runSession(ctx, root, cfg) {
   function draw() {
     root.innerHTML = `<div class="session">${header()}<section class="card qcard" aria-live="polite">${isTest ? drawTest() : drawFlash()}</section></div>`
     root.querySelector('.btn.primary, .grade.g3, [data-act="reveal"]')?.focus({ preventScroll: true })
+    paintClock()
   }
 
   function reveal(correct = null) {
@@ -162,8 +189,11 @@ export function runSession(ctx, root, cfg) {
     present(back)
   }
 
-  function finishTest() {
+  function finishTest(timedOut = false) {
+    clock?.tick(Date.now(), clockRunning())
     card = null
+    clearInterval(ticker)
+    const unanswered = total - results.length
     const missed = results.filter(r => !r.correct).map(r => r.card)
     const right = results.length - missed.length
     const topics = topicsOf(deck, missed).slice(0, 5)
@@ -172,8 +202,10 @@ export function runSession(ctx, root, cfg) {
 
     root.innerHTML = `<div class="session"><section class="card done">
       <p class="muted" style="margin-bottom:4px">${esc(cfg.label)}</p>
-      <div class="big">${right} / ${results.length}</div>
-      <p class="muted" style="font-size:1.2rem">${pct(right / (results.length || 1))} correct</p>
+      ${timedOut ? `<p class="timeup"><b>Time's up.</b> ${results.length} of ${total} answered.</p>` : ''}
+      <div class="big">${right} / ${total}</div>
+      <p class="muted" style="font-size:1.1rem;margin-bottom:${clock ? '4px' : '1rem'}">${pct(right / total)} correct${unanswered ? ` · ${unanswered} unanswered` : ''}</p>
+      ${clock && results.length ? `<p class="muted small">${fmtSpan(clock.spent)} answering${timerMode === 'pace' ? ` of ${fmtSpan(clock.budgetMs)} allowed` : ''} · about ${fmtSpan(clock.spent / results.length)} per question</p>` : ''}
       ${missed.length && notes.length ? `<div class="push"><p><b>Next: study the notecards behind what you missed.</b></p>
         <p class="muted small">${notes.length} notecard${notes.length === 1 ? '' : 's'} cover the services and concepts in the ${missed.length} question${missed.length === 1 ? '' : 's'} you got wrong.</p>
         <a class="btn primary lg" href="#/flash?focus=${focus}">Study ${notes.length} notecard${notes.length === 1 ? '' : 's'}</a></div>` : ''}
@@ -234,6 +266,7 @@ export function runSession(ctx, root, cfg) {
   document.addEventListener('keydown', onKey)
   nextCard()
   return () => {
+    clearInterval(ticker)
     root.removeEventListener('click', onClick)
     document.removeEventListener('keydown', onKey)
   }

@@ -10,6 +10,7 @@ const LOG_LIMIT = 20000
 export const DEFAULT_SETTINGS = {
   newPerDay: 20, // new notecards introduced per day
   testLength: 30, // questions per test
+  testTimer: 'pace', // 'pace' | 'stopwatch' | 'off'
   examDate: null, // 'YYYY-MM-DD' or null
   mode: 'quiz', // 'quiz' (answer the question) | 'flip' (see answer, self-grade)
   shuffleOptions: true,

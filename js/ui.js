@@ -1,5 +1,6 @@
 import { esc } from './util.js'
-import { KIND_LABEL } from './deck.js'
+import { KIND_LABEL, weakQuestions, notecardsFor, topicsOf } from './deck.js'
+import { mastery } from './scheduler.js'
 
 export const MASTERY_ORDER = ['nailed', 'familiar', 'learning', 'new']
 export const MASTERY_LABEL = { new: 'New', learning: 'Learning', familiar: 'Familiar', nailed: 'Nailed' }
@@ -54,4 +55,28 @@ export function scopeLabel(deck, scope) {
   if (scope.service) return deck.services.get(scope.service)?.name ?? scope.service
   if (scope.status === 'struggling') return 'Struggling cards'
   return 'All topics'
+}
+
+export function scopeFromQuery(q) {
+  const scope = {}
+  for (const k of ['domain', 'task', 'service', 'status', 'kind']) if (q.get(k)) scope[k] = q.get(k)
+  return scope
+}
+
+/**
+ * A nudge toward the notecards when recent questions have gone badly. Returns ''
+ * when there is nothing worth pushing. Used on Home and the Study page.
+ */
+export function weakCallout(ctx) {
+  const lo = ctx.levelOpts()
+  const weak = weakQuestions(ctx.deck, ctx.getCard, lo)
+  if (weak.length < 2) return ''
+  const topics = topicsOf(ctx.deck, weak).slice(0, 3)
+  const notes = notecardsFor(ctx.deck, weak).filter(c => mastery(ctx.getCard(c.id), lo) !== 'nailed')
+  const where = topics.length ? topics.map(t => `<b>${t.id}</b> ${esc(t.name.replace(/^(Identify|Define|Understand|Compare)\s+/i, ''))}`).join('; ') : `${weak.length} questions`
+  return `<div class="callout">
+    <div><p><b>Study these notecards first</b></p><p class="sub">You've been missing questions on ${where}.</p></div>
+    ${notes.length ? `<a class="btn primary" href="#/flash?weak=1">Study ${notes.length} notecard${notes.length === 1 ? '' : 's'}</a>`
+      : topics.length ? `<a class="btn primary" href="#/study/${topics[0].id}">Open ${topics[0].id}</a>` : ''}
+  </div>`
 }

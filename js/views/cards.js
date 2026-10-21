@@ -20,7 +20,7 @@ export function render(ctx, route, root) {
   const opt = (v, label, cur) => `<option value="${v}"${String(cur) === String(v) ? ' selected' : ''}>${esc(label)}</option>`
   root.innerHTML = `
     <h1>Cards</h1>
-    <p class="muted">Browse everything in the deck and see where each card stands. Suspend a card to stop it from appearing in reviews.</p>
+    <p class="muted">Browse everything in the deck and see where each card stands. Suspend a card to stop it from appearing in tests or notecards.</p>
     <div class="card">
       <div class="filters" role="search">
         <select id="f-domain" aria-label="Domain">${opt('', 'All domains', f.domain)}${deck.domains.map(d => opt(d.id, `${d.id}. ${d.name}`, f.domain)).join('')}</select>

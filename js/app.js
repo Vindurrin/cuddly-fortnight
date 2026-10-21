@@ -4,12 +4,13 @@ import { maxIntervalForExam, DEFAULTS } from './scheduler.js'
 import { esc } from './util.js'
 import * as home from './views/home.js'
 import * as study from './views/study.js'
-import * as learn from './views/learn.js'
+import * as test from './views/test.js'
+import * as flash from './views/flash.js'
 import * as cards from './views/cards.js'
 import * as stats from './views/stats.js'
 import * as settings from './views/settings.js'
 
-const ROUTES = { '': home, study, learn, cards, stats, settings }
+const ROUTES = { '': home, test, flash, study, cards, stats, settings }
 const root = document.getElementById('app')
 let cleanup = null
 let ctx = null
@@ -31,12 +32,14 @@ function render() {
   cleanup?.()
   cleanup = null
   const route = parseHash()
+  if (route.name === 'learn') { location.replace(`#/study/${route.parts.join('/')}`); return }
   const view = ROUTES[route.name] ?? home
   document.querySelectorAll('#nav a').forEach(a => {
-    if (a.dataset.route === (ROUTES[route.name] ? route.name : '')) a.setAttribute('aria-current', 'page')
+    const active = route.name === 'flash' ? 'study' : route.name
+    if (a.dataset.route === (ROUTES[active] ? active : '')) a.setAttribute('aria-current', 'page')
     else a.removeAttribute('aria-current')
   })
-  document.title = `${view.title?.(ctx, route) ?? 'Today'} · CLF-C02 Study`
+  document.title = `${view.title?.(ctx, route) ?? 'Home'} · CLF-C02 Study`
   try {
     cleanup = view.render(ctx, route, root) ?? null
   } catch (err) {

@@ -1,6 +1,6 @@
 // Builds the study queue and runs a study session.
 
-import { review, isDue, DEFAULTS } from './scheduler.js'
+import { review, isDue, mastery, isStruggling, DEFAULTS } from './scheduler.js'
 import { filterCards } from './deck.js'
 import { startOfDay, addDays, shuffle, MIN } from './util.js'
 
@@ -99,9 +99,45 @@ export function planQueue({ deck, getCard, settings, scope = {}, now, rand = Mat
   }
 }
 
+/**
+ * Pick `count` practice questions for a test: due reviews first (struggling ones
+ * leading), then never-seen questions, then the soonest-due of the rest. Unlike
+ * flashcard sessions there is no daily new-card limit, so a long test is possible.
+ */
+export function planTest({ deck, getCard, settings, scope = {}, now, count, rand = Math.random, masteryOpts }) {
+  const pool = filterCards(deck, { ...scope, kind: 'mcq' }, getCard, now, masteryOpts).filter(c => !getCard(c.id)?.suspended)
+  const due = [], unseen = [], future = []
+  for (const c of pool) {
+    const st = getCard(c.id)
+    if (!st || st.s === 'new') unseen.push(c)
+    else if (isDue(st, now, LEARN_AHEAD)) due.push(c)
+    else future.push(c)
+  }
+  const rank = c => (isStruggling(getCard(c.id), masteryOpts) ? 0 : 1)
+  due.sort((a, b) => rank(a) - rank(b) || getCard(a.id).due - getCard(b.id).due)
+  future.sort((a, b) => getCard(a.id).due - getCard(b.id).due)
+
+  const picked = due.slice(0, count)
+  if (picked.length < count) picked.push(...pickNew(unseen, count - picked.length, deck, settings.newOrder, rand))
+  if (picked.length < count) picked.push(...future.slice(0, count - picked.length))
+  return {
+    cards: shuffle(picked, rand),
+    available: { total: pool.length, due: due.length, unseen: unseen.length, future: future.length },
+  }
+}
+
+/** A "go through these now" queue: everything given that is not nailed or suspended, shuffled. */
+export function planForced(cards, { getCard, masteryOpts, rand = Math.random }) {
+  return shuffle(cards.filter(c => {
+    const st = getCard(c.id)
+    return !st?.suspended && mastery(st, masteryOpts) !== 'nailed'
+  }), rand)
+}
+
 export class Session {
-  constructor({ plan, getCard, putCard, deleteCard, popLog, addLog, options = {}, deck }) {
+  constructor({ plan, getCard, putCard, deleteCard, popLog, addLog, options = {}, deck, requeue = true }) {
     this.deck = deck
+    this.requeue = requeue
     this.getCard = getCard
     this.putCard = putCard
     this.deleteCard = deleteCard
@@ -152,7 +188,7 @@ export class Session {
     const idx = this.main.findIndex(c => c.id === card.id)
     this.history.push({ card, before, fromMain: idx !== -1, isNew, grade, correct })
     if (idx !== -1) this.main.splice(idx, 1)
-    if (after.s === 'learn' || after.s === 'relearn') this.learning.set(card.id, card)
+    if (this.requeue && (after.s === 'learn' || after.s === 'relearn')) this.learning.set(card.id, card)
     else this.learning.delete(card.id)
 
     this.stats.answered++
@@ -174,7 +210,7 @@ export class Session {
     else this.deleteCard(h.card.id)
     this.popLog()
 
-    if (h.before && (h.before.s === 'learn' || h.before.s === 'relearn')) this.learning.set(h.card.id, h.card)
+    if (this.requeue && h.before && (h.before.s === 'learn' || h.before.s === 'relearn')) this.learning.set(h.card.id, h.card)
     else this.learning.delete(h.card.id)
     if (h.fromMain) this.main.unshift(h.card)
 

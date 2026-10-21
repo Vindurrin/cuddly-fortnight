@@ -1,249 +1,123 @@
-import { planQueue, Session } from '../session.js'
-import { previewIntervals, GRADE, GRADE_LABEL } from '../scheduler.js'
-import { cardChips, scopeLabel, qs, pct } from '../ui.js'
-import { esc, shuffle, fmtDuration, startOfDay, addDays } from '../util.js'
-import { scopeFromQuery } from './home.js'
+// The Study section: notecards plus one reading page per exam task statement.
 
-export const title = () => 'Study'
+import { summarize, tally, masteryScore, NOTECARD_KINDS } from '../deck.js'
+import { planQueue } from '../session.js'
+import { mastery, isStruggling } from '../scheduler.js'
+import { masteryBar, legend, statusChip, pct, qs, weakCallout } from '../ui.js'
+import { esc } from '../util.js'
 
-const LETTERS = 'ABCDEFGH'
+const EXAM_GUIDE = 'https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html'
+
+export function title(ctx, route) {
+  const t = route.parts[0] && ctx.deck.tasks.find(t => t.id === route.parts[0])
+  return t ? `${t.id} ${t.name}` : 'Study'
+}
 
 export function render(ctx, route, root) {
-  const { deck, store } = ctx
-  const settings = store.getSettings()
+  const task = route.parts[0] && ctx.deck.tasks.find(t => t.id === route.parts[0])
+  return task ? renderTask(ctx, task, root) : renderIndex(ctx, root)
+}
+
+export function notecardCounts(ctx, scope = {}) {
+  const now = ctx.now()
+  const plan = planQueue({ deck: ctx.deck, getCard: ctx.getCard, settings: ctx.settings, scope: { ...scope, kind: NOTECARD_KINDS }, now, masteryOpts: ctx.levelOpts() })
+  const isNew = c => !ctx.getCard(c.id) || ctx.getCard(c.id).s === 'new'
+  const fresh = plan.main.filter(isNew).length
+  const learningDue = plan.learning.filter(c => ctx.getCard(c.id).due <= now).length
+  return { due: plan.main.length - fresh + learningDue, fresh, later: plan.futureCount, newAvailable: plan.newAvailable }
+}
+
+function renderIndex(ctx, root) {
+  const { deck } = ctx
   const lo = ctx.levelOpts()
-  const q = route.query
-  const scope = scopeFromQuery(q)
-  const sessionOpts = { fuzz: true, ...lo }
+  const sum = summarize(deck, ctx.getCard, ctx.now(), lo)
+  const nc = notecardCounts(ctx)
+  const ready = nc.due + nc.fresh
+  const total = deck.cards.filter(c => c.kind !== 'mcq').length
+  const n = (t, ...k) => deck.cards.filter(x => x.task === t && k.includes(x.kind)).length
 
-  const plan = planQueue({
-    deck, getCard: ctx.getCard, settings, scope, now: ctx.now(), masteryOpts: lo,
-    extraNew: Number(q.get('extra')) || 0, ahead: q.get('ahead') === '1',
-  })
-  const session = new Session({
-    plan, deck, options: sessionOpts,
-    getCard: ctx.getCard, putCard: store.putCard, deleteCard: store.deleteCard, popLog: store.popLog, addLog: store.addLog,
-  })
-  const total = plan.main.length + plan.learning.length
-
-  // Per-card presentation state
-  let card = null
-  let phase = 'question' // 'question' | 'answered'
-  let order = []
-  let selected = new Set()
-  let result = null // { correct: bool|null }
-  let shownAt = 0
-
-  function present(c) {
-    card = c
-    phase = 'question'
-    selected = new Set()
-    result = null
-    shownAt = Date.now()
-    order = Object.keys(c.options ?? {})
-    if (c.kind === 'mcq' && settings.shuffleOptions && !c.fixedOrder) order = shuffle(order)
-    draw()
-  }
-
-  function nextCard() {
-    const c = session.next(ctx.now())
-    if (!c) return finish()
-    present(c)
-  }
-
-  const flipMode = () => card.kind !== 'mcq' || settings.mode === 'flip'
-
-  function head() {
-    const r = session.remaining
-    const cur = card ? (ctx.getCard(card.id)?.s ?? 'new') : ''
-    const on = (k, active) => (active ? ' class="on"' : '')
-    return `<div class="study-head">
-      <a class="btn link" href="#/" data-act="exit">← Exit</a>
-      <div class="study-counts" aria-label="Cards remaining">
-        <span class="n-new"${on('new', cur === 'new')}>${r.new} new</span>
-        <span class="n-learn"${on('learn', cur === 'learn' || cur === 'relearn')}>${r.learning} learning</span>
-        <span class="n-rev"${on('rev', cur === 'review')}>${r.review} review</span>
+  root.innerHTML = `
+    <div class="pagehead"><h1>Study</h1><p>Notecards and a reading page for each topic on the exam.</p></div>
+    ${weakCallout(ctx)}
+    <section class="card">
+      <div class="row between">
+        <div><h2 style="margin-bottom:4px">Notecards</h2>
+          <p class="muted" style="margin:0">${ready ? `${nc.due} due for review · ${nc.fresh} new today` : nc.later ? `All caught up. ${nc.later} scheduled for later.` : `${total} notecards to learn.`}</p></div>
+        <div class="actions">
+          ${ready ? `<a class="btn primary lg" href="#/flash">Study ${ready} notecard${ready === 1 ? '' : 's'}</a>`
+            : nc.newAvailable ? `<a class="btn primary lg" href="#/flash?extra=10">Learn 10 more</a>` : ''}
+          ${!ready && nc.later ? '<a class="btn" href="#/flash?ahead=1">Study ahead</a>' : ''}
+        </div>
       </div>
-      <button class="btn link" data-act="undo" ${session.canUndo ? '' : 'disabled'} title="Undo last answer (Z)">Undo</button>
+    </section>
+
+    ${deck.domains.map(d => `
+      <section class="card">
+        <div class="row between"><h2 style="margin:0">Domain ${d.id}: ${esc(d.name)}</h2><span class="chip">${d.weight}% of exam</span></div>
+        <div class="tasklist" style="margin-top:18px">
+          ${deck.tasks.filter(t => t.domainId === d.id).map(t => {
+            const c = sum.byTask[t.id]
+            return `<a class="taskcard" href="#/study/${t.id}">
+              <span class="id">${t.id}</span><span><b>${esc(t.name)}</b><br><span class="muted small">${n(t.id, 'service', 'concept')} notecards · ${n(t.id, 'mcq')} questions · ${pct(masteryScore(c))} mastered</span></span>
+              ${masteryBar(c, true)}</a>`
+          }).join('')}
+        </div>
+      </section>`).join('')}
+    ${legend()}
+    <p class="muted small" style="margin-top:16px">Topics follow the <a href="${EXAM_GUIDE}" target="_blank" rel="noopener">official exam guide</a>. Matching questions to a topic is automatic, so a few may sit under a neighbouring one. <a href="#/cards?kind=mcq&task=none">Browse unmatched questions</a>.</p>`
+}
+
+function renderTask(ctx, task, root) {
+  const { deck } = ctx
+  const now = ctx.now(), lo = ctx.levelOpts(), get = ctx.getCard
+  const domain = deck.domains.find(d => d.id === task.domainId)
+  const cards = deck.cards.filter(c => c.task === task.id)
+  const services = cards.filter(c => c.kind === 'service')
+  const concepts = cards.filter(c => c.kind === 'concept')
+  const questions = cards.filter(c => c.kind === 'mcq')
+  const notecards = [...services, ...concepts]
+  const counts = tally(cards, get, now, lo)
+  const open = notecards.filter(c => mastery(get(c.id), lo) !== 'nailed').length
+  const idx = deck.tasks.findIndex(t => t.id === task.id)
+  const prev = deck.tasks[idx - 1], next = deck.tasks[idx + 1]
+  const chip = c => statusChip(mastery(get(c.id), lo), isStruggling(get(c.id), lo))
+
+  root.innerHTML = `
+    <div class="crumbs"><a href="#/study">Study</a> › Domain ${domain.id}: ${esc(domain.name)}</div>
+    <div class="pagehead"><h1>${task.id} ${esc(task.name)}</h1><p>Domain ${domain.id} is ${domain.weight}% of the exam.</p></div>
+
+    <section class="card">
+      ${masteryBar(counts)}
+      <p class="muted small" style="margin:8px 0 20px">${counts.nailed} nailed · ${counts.familiar} familiar · ${counts.learning} learning · ${counts.new} new</p>
+      <div class="actions">
+        ${notecards.length ? `<a class="btn primary" href="#/flash${qs({ task: task.id, force: 1 })}">${open ? `Study ${open} notecard${open === 1 ? '' : 's'}` : 'Review notecards'}</a>` : ''}
+        ${questions.length ? `<a class="btn" href="#/test/run${qs({ task: task.id, n: Math.min(10, questions.length) })}">Test me on this topic</a>` : ''}
+        ${questions.length ? `<a class="btn link" href="#/cards${qs({ task: task.id, kind: 'mcq' })}">Browse ${questions.length} questions</a>` : ''}
+      </div>
+    </section>
+
+    ${concepts.length ? `<section class="card"><h2>Core concepts</h2>
+      <p class="muted small">Try to answer from memory before you open each one.</p>
+      ${concepts.map(c => `<details class="concept"><summary>${esc(c.front)} ${chip(c)}</summary><p>${esc(c.back)}</p></details>`).join('')}</section>` : ''}
+
+    ${services.length ? `<section class="card"><h2>Services to know</h2>
+      ${services.map(s => `<div class="svc"><h3>${esc(s.name)} ${chip(s)}</h3>
+        <p style="margin:0 0 4px">${esc(s.front)}</p>
+        <p class="muted small" style="margin:0">${esc(s.notes)}</p>
+        ${s.vs ? `<p class="vs small" style="margin:4px 0 0"><b>Don't confuse:</b> ${esc(s.vs)}</p>` : ''}
+        ${deck.cards.some(q => q.kind === 'mcq' && q.services?.includes(s.serviceId)) ? `<a class="small" href="#/cards${qs({ service: s.serviceId, kind: 'mcq' })}">Questions mentioning this service</a>` : ''}
+      </div>`).join('')}</section>` : ''}
+
+    ${!notecards.length ? '<section class="card"><p class="muted" style="margin:0">This topic is covered through practice questions. Use <b>Test me on this topic</b> above.</p></section>' : ''}
+
+    <section class="card"><h2>Go deeper</h2>
+      <ul style="margin:0;padding-left:1.2rem">
+        <li><a href="${EXAM_GUIDE}" target="_blank" rel="noopener">Official CLF-C02 exam guide</a></li>
+        <li><a href="https://skillbuilder.aws/" target="_blank" rel="noopener">AWS Skill Builder</a> for free Cloud Practitioner learning content</li>
+      </ul></section>
+
+    <div class="row between">
+      ${prev ? `<a class="btn" href="#/study/${prev.id}">← ${prev.id}</a>` : '<span></span>'}
+      ${next ? `<a class="btn" href="#/study/${next.id}">${next.id} →</a>` : '<span></span>'}
     </div>`
-  }
-
-  function optionsHtml() {
-    const correctKeys = new Set(card.answer)
-    const multi = card.answer.length > 1
-    const li = order.map((key, i) => {
-      const letter = LETTERS[i]
-      const text = esc(card.options[key])
-      if (phase === 'answered') {
-        const isCorrect = correctKeys.has(key)
-        const picked = selected.has(key)
-        const cls = isCorrect ? (picked || flipMode() ? 'correct' : 'missed') : picked ? 'wrong' : ''
-        const tag = isCorrect ? (picked || flipMode() ? '✓ Correct' : '✓ Correct answer') : picked ? '✗ Your answer' : ''
-        return `<li><div class="opt ${cls}"><span class="k">${letter}</span><span>${text}</span>${tag ? `<span class="tag">${tag}</span>` : ''}</div></li>`
-      }
-      if (flipMode()) return `<li><div class="opt"><span class="k">${letter}</span><span>${text}</span></div></li>`
-      return `<li><button class="opt${selected.has(key) ? ' selected' : ''}" data-key="${key}" aria-pressed="${selected.has(key)}"><span class="k">${letter}</span><span>${text}</span></button></li>`
-    }).join('')
-    return `<ul class="opts" ${multi && phase === 'question' && !flipMode() ? 'role="group" aria-label="Select all that apply"' : ''}>${li}</ul>`
-  }
-
-  function explanationHtml() {
-    const [why, others] = card.explanation
-    return `<div class="explain"><h3>Why this is right</h3><p>${esc(why)}</p>${others ? `<div class="sub"></div><h3>Why the others are not</h3><p>${esc(others)}</p>` : ''}</div>`
-  }
-
-  function gradeButtons() {
-    const st = ctx.getCard(card.id)
-    const base = st ?? { id: card.id, s: 'new', step: 0, ease: 2.5, ivl: 0, due: 0, reps: 0, lapses: 0, streak: 0, first: 0, last: 0 }
-    const labels = previewIntervals(base, ctx.now(), sessionOpts)
-    const allowed = result?.correct === false ? [1] : result?.correct === true ? [2, 3, 4] : [1, 2, 3, 4]
-    return `<div class="grades" role="group" aria-label="How well did you know it?">${allowed.map(g =>
-      `<button class="grade g${g}" data-grade="${g}"><span>${result?.correct === false ? 'Continue' : GRADE_LABEL[g]}</span><small>${labels[g]}</small><span class="kbd">${result?.correct === false ? 'Enter' : g}</span></button>`
-    ).join('')}</div>`
-  }
-
-  function draw() {
-    if (!card) return
-    let body
-    if (card.kind === 'mcq') {
-      const multi = card.answer.length > 1
-      const verdict = phase === 'answered' && result.correct !== null
-        ? `<div class="verdict ${result.correct ? 'ok' : 'no'}" role="status">${result.correct ? 'Correct' : 'Not quite'}</div>` : ''
-      let controls
-      if (phase === 'question') {
-        controls = flipMode()
-          ? `<button class="btn primary lg" data-act="reveal">Show answer <span class="kbd">Space</span></button>`
-          : multi ? `<button class="btn primary lg" data-act="check" ${selected.size === card.answer.length ? '' : 'disabled'}>Check answer <span class="kbd">Enter</span></button>` : ''
-      } else controls = gradeButtons()
-      body = `${cardChips(deck, card)}
-        <p class="qtext">${esc(card.question)}</p>
-        ${multi && phase === 'question' ? `<p class="hint">Select ${card.answer.length}</p>` : ''}
-        ${verdict}${optionsHtml()}
-        ${phase === 'answered' ? explanationHtml() : ''}
-        ${controls}`
-    } else {
-      const label = card.kind === 'service' ? 'Which AWS service is this?' : 'Concept'
-      let back = ''
-      if (phase === 'answered') {
-        back = card.kind === 'service'
-          ? `<div class="answerbox"><div class="name">${esc(card.name)}</div></div><div class="explain"><p>${esc(card.notes)}</p>${card.vs ? `<p class="muted small"><b>Don't confuse:</b> ${esc(card.vs)}</p>` : ''}</div>`
-          : `<div class="answerbox"><p style="margin:0">${esc(card.back)}</p></div>`
-      }
-      body = `${cardChips(deck, card)}
-        <p class="hint" style="margin-top:12px">${label}</p>
-        <p class="qtext" style="margin-top:0">${esc(card.front)}</p>
-        ${back}
-        ${phase === 'question' ? `<button class="btn primary lg" data-act="reveal">Show answer <span class="kbd">Space</span></button>` : gradeButtons()}`
-    }
-    root.innerHTML = `${head()}<section class="card qcard" aria-live="polite">${body}</section>`
-    root.querySelector('.grade.g3, [data-grade], [data-act="reveal"], [data-act="check"]')?.focus({ preventScroll: true })
-  }
-
-  function reveal(correct = null) {
-    if (phase !== 'question') return
-    phase = 'answered'
-    result = { correct }
-    draw()
-  }
-
-  function submitChoice() {
-    const right = card.answer.length === selected.size && card.answer.every(k => selected.has(k))
-    reveal(right)
-  }
-
-  function grade(g) {
-    if (phase !== 'answered') return
-    session.answer(card, g, ctx.now(), { correct: result.correct, ms: Date.now() - shownAt })
-    nextCard()
-  }
-
-  function finish() {
-    card = null
-    const s = session.stats
-    const now = ctx.now()
-    const upcoming = deck.cards
-      .map(c => ctx.getCard(c.id))
-      .filter(st => st && st.s !== 'new' && !st.suspended && st.due > now)
-      .map(st => st.due)
-    const tomorrow = addDays(now, 1)
-    const dueTomorrow = deck.cards.filter(c => { const st = ctx.getCard(c.id); return st && st.s === 'review' && !st.suspended && st.due >= tomorrow && st.due < addDays(now, 2) }).length
-    const more = planQueue({ deck, getCard: ctx.getCard, settings, scope, now, masteryOpts: lo })
-    const nextAt = upcoming.length ? fmtDuration(Math.min(...upcoming) - now) : null
-    root.innerHTML = `<section class="card done">
-      <div class="big" aria-hidden="true">${s.answered ? '🎉' : '✅'}</div>
-      <h2>${s.answered ? 'Session complete' : 'Nothing to study right now'}</h2>
-      <p class="muted">${esc(scopeLabel(deck, scope))}</p>
-      ${s.answered ? `<div class="stat-grid">
-        <div class="stat"><b>${s.answered}</b><span>cards answered</span></div>
-        <div class="stat"><b>${s.graded ? pct(s.correct / s.graded) : '—'}</b><span>answered correctly</span></div>
-        <div class="stat"><b>${s.newSeen}</b><span>new cards learned</span></div>
-        <div class="stat"><b>${s.again}</b><span>to revisit soon</span></div>
-      </div>` : ''}
-      <p class="muted small">${dueTomorrow ? `${dueTomorrow} card${dueTomorrow === 1 ? '' : 's'} due tomorrow. ` : ''}${nextAt ? `Next card comes due in ${nextAt}.` : ''}</p>
-      <div class="actions" style="justify-content:center">
-        <a class="btn primary" href="#/">Back to Today</a>
-        ${more.newAvailable ? `<a class="btn" href="#/study${qs({ ...Object.fromEntries(q), extra: (Number(q.get('extra')) || 0) + 10 })}">Learn 10 more new cards</a>` : ''}
-        ${more.futureCount ? `<a class="btn" href="#/study${qs({ ...scope, ahead: 1 })}">Study ahead</a>` : ''}
-      </div></section>`
-    root.querySelector('a.primary')?.focus({ preventScroll: true })
-  }
-
-  function onClick(e) {
-    const t = e.target.closest('[data-key],[data-grade],[data-act]')
-    if (!t || !root.contains(t)) return
-    if (t.dataset.key) {
-      if (phase !== 'question') return
-      toggle(t.dataset.key)
-    } else if (t.dataset.grade) grade(Number(t.dataset.grade))
-    else if (t.dataset.act === 'reveal') reveal(null)
-    else if (t.dataset.act === 'check') submitChoice()
-    else if (t.dataset.act === 'undo') undo()
-  }
-
-  function toggle(key) {
-    if (phase !== 'question' || flipMode()) return
-    const need = card.answer.length
-    if (need === 1) {
-      selected = new Set([key])
-      submitChoice()
-      return
-    }
-    if (selected.has(key)) selected.delete(key)
-    else if (selected.size < need) selected.add(key)
-    draw()
-  }
-
-  function undo() {
-    const back = session.undo()
-    if (back) present(back)
-  }
-
-  function onKey(e) {
-    if (!card || e.metaKey || e.ctrlKey || e.altKey) return
-    if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return
-    const k = e.key
-    if (k === 'z' || k === 'Z') return void (session.canUndo && (e.preventDefault(), undo()))
-    if (phase === 'question') {
-      if (!flipMode() && card.kind === 'mcq') {
-        const i = LETTERS.indexOf(k.toUpperCase())
-        if (k.length === 1 && i >= 0 && i < order.length) { e.preventDefault(); return toggle(order[i]) }
-        if (k === 'Enter' && card.answer.length > 1 && selected.size === card.answer.length) { e.preventDefault(); return submitChoice() }
-      } else if (k === ' ' || k === 'Enter') { e.preventDefault(); return reveal(null) }
-    } else {
-      if (result.correct === false) { if (k === 'Enter' || k === ' ' || k === '1') { e.preventDefault(); grade(1) } return }
-      if (k === 'Enter' || k === ' ') { e.preventDefault(); return grade(3) }
-      if (/^[1-4]$/.test(k) && !(result.correct === true && k === '1')) { e.preventDefault(); grade(Number(k)) }
-    }
-  }
-
-  root.addEventListener('click', onClick)
-  document.addEventListener('keydown', onKey)
-
-  if (!total) finish()
-  else nextCard()
-
-  return () => {
-    root.removeEventListener('click', onClick)
-    document.removeEventListener('keydown', onKey)
-  }
 }

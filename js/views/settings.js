@@ -13,15 +13,16 @@ export function render(ctx, route, root) {
     <h1>Settings</h1>
     <section class="card">
       <h2>Studying</h2>
-      <div class="field"><label for="newPerDay">New cards per day</label>
+      <div class="field"><label for="testLength">Questions per test</label>
+        <input id="testLength" type="number" min="1" max="200" value="${s.testLength}" style="width:110px">
+        <span class="help">The default length of a test. The real exam has 65 questions. You can also pick a length each time on the Test page.</span></div>
+      <div class="field"><label for="newPerDay">New notecards per day</label>
         <input id="newPerDay" type="number" min="0" max="500" value="${s.newPerDay}" style="width:110px">
-        <span class="help">How many unseen cards to introduce each day. 20 is a steady pace; the deck has ${ctx.deck.cards.length} cards.</span></div>
+        <span class="help">How many unseen notecards to introduce each day. There are ${ctx.deck.cards.filter(c => c.kind !== 'mcq').length} in total.</span></div>
       <div class="field"><label for="examDate">Exam date</label>
         <div class="row"><input id="examDate" type="date" value="${esc(s.examDate ?? '')}"><button class="btn sm" id="clearExam" ${s.examDate ? '' : 'hidden'}>Clear</button></div>
         <span class="help">${s.examDate ? `Review gaps are capped at ${lo.maxInterval} day${lo.maxInterval === 1 ? '' : 's'} so every card is seen again before the exam, and "nailed" means scheduled ${lo.nailedDays}+ days out.` : 'Optional. With a date set, review gaps are capped so every card comes back before the exam.'}</span></div>
-      <div class="field"><label for="mode">Question cards</label>
-        <select id="mode">${opt('quiz', 'Quiz: pick your answer, then see if you were right', s.mode)}${opt('flip', 'Flip: think of the answer, reveal it, then rate yourself', s.mode)}</select></div>
-      <div class="field"><label for="newOrder">Order of new cards</label>
+      <div class="field"><label for="newOrder">Order of new notecards</label>
         <select id="newOrder">${opt('weighted', 'Mixed, weighted by exam domain', s.newOrder)}${opt('ordered', 'In deck order', s.newOrder)}</select></div>
       <div class="switch"><input id="shuffle" type="checkbox" ${s.shuffleOptions ? 'checked' : ''}><label for="shuffle">Shuffle answer options</label></div>
     </section>
@@ -58,7 +59,11 @@ export function render(ctx, route, root) {
   })
   $('#examDate').addEventListener('change', e => { save({ examDate: e.target.value || null }); ctx.refresh() })
   $('#clearExam').addEventListener('click', () => { save({ examDate: null }); ctx.refresh() })
-  $('#mode').addEventListener('change', e => save({ mode: e.target.value }))
+  $('#testLength').addEventListener('change', e => {
+    const n = Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 30)))
+    e.target.value = n
+    save({ testLength: n })
+  })
   $('#newOrder').addEventListener('change', e => save({ newOrder: e.target.value }))
   $('#shuffle').addEventListener('change', e => save({ shuffleOptions: e.target.checked }))
   $('#theme').addEventListener('change', e => { save({ theme: e.target.value }); ctx.applyTheme(e.target.value) })

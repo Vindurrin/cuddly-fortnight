@@ -153,6 +153,16 @@ export function isStruggling(card, options = {}) {
   return !!card && card.lapses >= 2 && mastery(card, options) !== 'nailed'
 }
 
+/**
+ * Showing difficulty right now: the last answer was a miss, or the card has lapsed
+ * and has not yet been answered correctly three times in a row. Nailed cards are never weak.
+ */
+export function isWeak(card, options = {}) {
+  if (!card || card.s === 'new' || card.reps === 0) return false
+  if (mastery(card, options) === 'nailed') return false
+  return card.streak === 0 || (card.lapses >= 1 && card.streak < 3)
+}
+
 export function isDue(card, now, aheadMs = 0) {
   if (!card || card.s === 'new') return false
   if (card.s === 'review') return card.due < addDays(now, 1)

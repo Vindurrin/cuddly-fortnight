@@ -1,7 +1,7 @@
 // Turns the raw data files into study cards, and answers questions about them
 // (filters, mastery summaries, forecast).
 
-import { mastery, isStruggling, isDue } from './scheduler.js'
+import { mastery, isStruggling, isWeak, isDue } from './scheduler.js'
 import { addDays, startOfDay, DAY } from './util.js'
 
 /** @returns {{cards: object[], byId: Map, domains: object[], tasks: object[], services: Map}} */
@@ -28,6 +28,35 @@ export function buildDeck(questions, modules) {
 }
 
 export const KIND_LABEL = { mcq: 'Question', service: 'Service', concept: 'Concept' }
+export const NOTECARD_KINDS = 'service,concept'
+
+/** Practice questions the learner is currently getting wrong. */
+export function weakQuestions(deck, getCard, masteryOpts) {
+  return deck.cards.filter(c => {
+    const st = getCard(c.id)
+    return c.kind === 'mcq' && st && !st.suspended && isWeak(st, masteryOpts)
+  })
+}
+
+/**
+ * Notecards that explain the given questions: the service cards for services a
+ * question mentions, plus the concept cards for the question's task statement.
+ */
+export function notecardsFor(deck, questions) {
+  const services = new Set(), tasks = new Set()
+  for (const q of questions) {
+    for (const s of q.services ?? []) services.add(s)
+    if (q.task) tasks.add(q.task)
+  }
+  return deck.cards.filter(c => (c.kind === 'service' && services.has(c.serviceId)) || (c.kind === 'concept' && tasks.has(c.task)))
+}
+
+/** [{ id, name, count }] task statements ranked by how many of the questions fall in them. */
+export function topicsOf(deck, questions) {
+  const counts = new Map()
+  for (const q of questions) if (q.task) counts.set(q.task, (counts.get(q.task) ?? 0) + 1)
+  return [...counts].sort((a, b) => b[1] - a[1]).map(([id, count]) => ({ id, count, name: deck.tasks.find(t => t.id === id)?.name ?? id }))
+}
 
 /**
  * scope: { domain, task ('none' for untagged), service, kind, status, search }
@@ -38,7 +67,7 @@ export function filterCards(deck, scope, getCard, now, masteryOpts) {
   return deck.cards.filter(c => {
     if (scope.domain && c.domain !== Number(scope.domain)) return false
     if (scope.task === 'none' ? c.task : scope.task && c.task !== scope.task) return false
-    if (scope.kind && c.kind !== scope.kind) return false
+    if (scope.kind && !scope.kind.split(',').includes(c.kind)) return false
     if (scope.service && !(c.serviceId === scope.service || c.services?.includes(scope.service))) return false
     const st = getCard(c.id)
     if (scope.status) {
@@ -46,6 +75,7 @@ export function filterCards(deck, scope, getCard, now, masteryOpts) {
       const m = mastery(st, masteryOpts)
       switch (scope.status) {
         case 'struggling': if (!isStruggling(st, masteryOpts)) return false; break
+        case 'weak': if (!isWeak(st, masteryOpts)) return false; break
         case 'due': if (!isDue(st, now) ) return false; break
         case 'suspended': if (!st?.suspended) return false; break
         default: if (m !== scope.status) return false

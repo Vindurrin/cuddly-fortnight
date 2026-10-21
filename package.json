@@ -1,0 +1,13 @@
+{
+  "name": "clf-c02-study",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Spaced-repetition flashcards and study modules for the AWS Certified Cloud Practitioner (CLF-C02) exam.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "build:data": "node scripts/build-data.mjs",
+    "serve": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}

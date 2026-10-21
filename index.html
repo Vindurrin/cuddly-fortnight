@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Spaced-repetition flashcards and study modules for the AWS Certified Cloud Practitioner (CLF-C02) exam.">
+  <title>CLF-C02 Study</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23232f3e'/%3E%3Cpath d='M9 20.5c0-2.2 1.7-4 3.9-4.2A5 5 0 0 1 22.6 15a3.7 3.7 0 0 1-.6 7.3H12.5A3.5 3.5 0 0 1 9 20.5z' fill='%23ff9900'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try {
+      var t = JSON.parse(localStorage.getItem('clf-c02-study:v1') || '{}').settings;
+      if (t && (t.theme === 'light' || t.theme === 'dark')) document.documentElement.dataset.theme = t.theme;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#app">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="#/"><span class="logo" aria-hidden="true">☁</span><span>CLF-C02 <b>Study</b></span></a>
+    <nav id="nav" aria-label="Main">
+      <a href="#/" data-route="">Home</a>
+      <a href="#/test" data-route="test">Test</a>
+      <a href="#/study" data-route="study">Study</a>
+      <a href="#/cards" data-route="cards">Cards</a>
+      <a href="#/stats" data-route="stats">Stats</a>
+      <a href="#/settings" data-route="settings">Settings</a>
+    </nav>
+  </header>
+  <div id="banner" role="status"></div>
+  <main id="app" tabindex="-1"><p class="loading">Loading…</p></main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

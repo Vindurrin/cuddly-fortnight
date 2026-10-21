@@ -34,7 +34,7 @@ export function render(ctx, route, root) {
       <div class="meta-line">
         ${examDays !== null ? `<span><b>${examDays > 0 ? `${examDays} day${examDays === 1 ? '' : 's'}` : examDays === 0 ? 'Exam day' : 'Exam date passed'}</b> ${examDays > 0 ? 'until your exam' : ''}</span>` : '<a href="#/settings">Set your exam date</a>'}
         <span>${doneToday} answered today</span>
-        <span>${streak ? `🔥 ${streak}-day streak` : 'No streak yet'}</span>
+        <span>${streak ? `${streak}-day streak` : 'No streak yet'}</span>
       </div></div>
 
     ${firstRun ? `<div class="card"><p style="margin:0"><b>How this works.</b> <b>Test</b> yourself with ${q} practice questions, or <b>Study</b> with notecards on the services and concepts. When you miss questions, you'll be sent to the notecards for those topics. Anything you get wrong comes back sooner; anything you know comes back less and less often.</p></div>` : ''}

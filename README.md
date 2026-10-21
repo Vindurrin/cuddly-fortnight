@@ -7,6 +7,7 @@ Spaced-repetition flashcards and study modules for the **AWS Certified Cloud Pra
 Two separate ways to study, joined by a nudge:
 
 - **Test**: practice questions only. Pick a length (10, 20, 30, 50, 65 or your own) and a topic, answer, read the explanation, move on. There is no daily cap, so you can do a full 65-question run in one go.
+  - **Timer**: *Exam pace* counts down at the real exam's rate (about 83 seconds a question, 90 minutes for 65) and ends the test when it runs out; *Stopwatch* counts up; or turn it off. It only counts time spent answering and pauses while you read an explanation or switch tabs.
 - **Study**: the notecards (115 "which AWS service is this?" service cards and 43 core-concept cards), plus a reading page for each of the 19 official exam task statements.
 - **The nudge**: when you miss questions, the results screen sends you to the notecards behind them (the services those questions mention and the concepts for their topic). Home and Study also show a "Study these notecards first" prompt while you are still getting a topic wrong.
 
